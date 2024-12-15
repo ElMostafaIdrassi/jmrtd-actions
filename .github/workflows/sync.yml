@@ -1,0 +1,51 @@
+name: Sync JMRTD SVN to GitHub mirror
+
+on:
+  schedule:
+    - cron: '0 0 15 * *'  # Run every month on the 15th
+  workflow_dispatch:      # Allow manual triggering
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Need to uninstall git that comes with the runner first
+    # because it is not installed from the Ubuntu's repositories
+    # and has a higher version than the one in the Ubuntu repositories,
+    # effectively breaking the installation of git-svn (dependency of svn2git) with :
+    # "git-svn : Depends: git (< 1:2.43.0-.) but 1:2.47.1-0ppa1~ubuntu24.04.1 is to be installed"
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get purge -y git
+        sudo apt-get autoremove -y
+        sudo apt-get install -y svn2git
+      shell: bash
+
+    - name: Convert SVN to Git
+      env:
+        AUTHORS_FILE: ${{ github.workspace }}/.github/workflows/authors.txt
+      run: |
+        rm -rf svn-to-git || true
+        mkdir svn-to-git
+        cd svn-to-git
+        git config --global gc.auto 0
+        svn2git https://svn.code.sf.net/p/jmrtd/code --authors=$AUTHORS_FILE
+        git config --global --unset gc.auto
+        git gc
+      shell: bash
+    
+    - name: Push to GitHub mirror
+      env:
+        GITHUB_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN }}
+      run: |
+        cd svn-to-git
+        git remote add mirror https://ElMostafaIdrassi:${GITHUB_TOKEN}@github.com/ElMostafaIdrassi/jmrtd.git
+        git push mirror --all || { echo 'Push branches to GitHub mirror failed'; exit 1; }
+        git push mirror --tags || { echo 'Push tags to GitHub mirror failed'; exit 1; }
+      shell: bash
